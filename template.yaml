@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Oref WhatsApp Alert Bot — polls Pikud Ha'oref API and sends alerts to WhatsApp
+
+Parameters:
+  BotConfigJson:
+    Type: String
+    Default: '{"groupJid":"","cities":[],"alertCategories":[],"messageTemplate":"\\u{1F6A8} *{title}*\\n\\n\\u{1F4CD} {cities}\\n\\n\\u26A0\\uFE0F {instructions}"}'
+    Description: Bot config JSON (groupJid, cities, alertCategories, messageTemplate)
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 30
+    MemorySize: 256
+
+Resources:
+  # --- S3 bucket for WhatsApp auth (encrypted with KMS) ---
+  AuthBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  AuthBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuthBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyUnencryptedPut
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub '${AuthBucket.Arn}/*'
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+
+  # --- DynamoDB table for alert deduplication ---
+  AlertStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-alert-state'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: alertId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: alertId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  # --- SSM Parameter for bot config ---
+  BotConfigParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${AWS::StackName}/config'
+      Type: String
+      Value: !Ref BotConfigJson
+      Description: Oref bot configuration (edit in AWS Console)
+
+  # --- Lambda function ---
+  OrefBotFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handler.handler
+      CodeUri: .
+      Environment:
+        Variables:
+          AUTH_S3_BUCKET: !Ref AuthBucket
+          DYNAMO_TABLE: !Ref AlertStateTable
+          SSM_PARAM_PATH: !Sub '/${AWS::StackName}/config'
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref AuthBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertStateTable
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub '${AWS::StackName}/config'
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 's3.${AWS::Region}.amazonaws.com'
+      Events:
+        PollSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Description: Poll oref API for alerts
+            Enabled: true
+
+Outputs:
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt OrefBotFunction.Arn
+  AuthBucketName:
+    Description: S3 bucket for WhatsApp auth credentials
+    Value: !Ref AuthBucket
+  AlertStateTableName:
+    Description: DynamoDB table for alert deduplication
+    Value: !Ref AlertStateTable
+  ConfigParamPath:
+    Description: SSM parameter path for bot config
+    Value: !Sub '/${AWS::StackName}/config'

@@ -1,5 +1,7 @@
 import axios from 'axios';
 import { EventEmitter } from 'events';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { OrefAlert, OrefApiResponse } from './types.js';
 import { config } from './config.js';
 
@@ -95,7 +97,7 @@ export class AlertPoller extends EventEmitter {
         console.log(`[poller] New alert — cat=${alert.cat}, cities=${alert.data.join(', ')}`);
         this.emit('alert', alert);
       } else {
-        console.log(`[poller] Alert filtered out — cat=${alert.cat}, cities=${alert.data.join(', ')}`);
+        console.log(`[poller] Alert filtered out — id=${alert.id}, cat=${alert.cat}, cities=${alert.data.join(', ')}`);
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -107,17 +109,88 @@ export class AlertPoller extends EventEmitter {
   }
 
   private passesFilter(alert: OrefAlert): boolean {
-    const { cities, alertCategories } = config;
-
-    // If no category filter configured, pass all
-    const categoryOk =
-      alertCategories.length === 0 || alertCategories.includes(alert.cat);
-
-    // If no city filter configured, pass all
-    const cityOk =
-      cities.length === 0 ||
-      alert.data.some((city) => cities.includes(city));
-
-    return categoryOk && cityOk;
+    return passesFilter(alert, config.cities, config.alertCategories);
   }
+}
+
+function passesFilter(
+  alert: OrefAlert,
+  cities: string[],
+  alertCategories: number[],
+): boolean {
+  const categoryOk =
+    alertCategories.length === 0 || alertCategories.includes(alert.cat);
+  const cityOk =
+    cities.length === 0 ||
+    alert.data.some((city) => cities.includes(city));
+  return categoryOk && cityOk;
+}
+
+/**
+ * Single-shot poll for Lambda. Fetches the oref API once, checks DynamoDB
+ * for dedup, and returns the alert if it's new and passes filters.
+ */
+export async function pollOnce(opts: {
+  dynamoTable: string;
+  cities: string[];
+  alertCategories: number[];
+}): Promise<OrefAlert | null> {
+  const response = await axios.get<OrefApiResponse | ''>(OREF_URL, {
+    headers: REQUEST_HEADERS,
+    timeout: 5000,
+    responseType: 'text',
+  });
+
+  const body = response.data as unknown as string;
+
+  if (!body || body.trim() === '' || body.trim() === '{}') {
+    return null;
+  }
+
+  let parsed: OrefApiResponse;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+
+  if (!parsed.id || !parsed.data?.length) {
+    return null;
+  }
+
+  // Check DynamoDB for dedup
+  const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  const existing = await dynamo.send(
+    new GetCommand({ TableName: opts.dynamoTable, Key: { alertId: parsed.id } }),
+  );
+  if (existing.Item) {
+    return null; // already sent
+  }
+
+  const alert: OrefAlert = {
+    id: parsed.id,
+    cat: parseInt(parsed.cat as unknown as string, 10),
+    title: parsed.title,
+    data: parsed.data,
+    desc: parsed.desc,
+  };
+
+  if (!passesFilter(alert, opts.cities, opts.alertCategories)) {
+    console.log(`[poller] Alert filtered out — cat=${alert.cat}, cities=${alert.data.join(', ')}`);
+    return null;
+  }
+
+  // Mark as sent in DynamoDB (TTL = 1 hour from now)
+  await dynamo.send(
+    new PutCommand({
+      TableName: opts.dynamoTable,
+      Item: {
+        alertId: parsed.id,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      },
+    }),
+  );
+
+  console.log(`[poller] New alert — cat=${alert.cat}, cities=${alert.data.join(', ')}`);
+  return alert;
 }

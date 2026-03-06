@@ -1,4 +1,5 @@
 import makeWASocket, {
+  AuthenticationState,
   DisconnectReason,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
@@ -142,5 +143,58 @@ export class WhatsAppClient {
     } catch (err) {
       console.error("[whatsapp] Could not fetch groups:", err);
     }
+  }
+}
+
+/**
+ * Ephemeral connect → send → disconnect for Lambda.
+ * Takes a pre-loaded auth state (e.g. from S3) so it doesn't touch local disk.
+ */
+export async function sendOnce(
+  groupJid: string,
+  message: string,
+  authState: { state: AuthenticationState; saveCreds: () => Promise<void> },
+): Promise<void> {
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    auth: authState.state,
+    printQRInTerminal: false,
+    browser: ["OrefBot", "Chrome", "1.0.0"],
+    syncFullHistory: false,
+  });
+
+  sock.ev.on("creds.update", authState.saveCreds);
+
+  // Wait for connection to open (or fail)
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("WhatsApp connection timed out after 15s"));
+    }, 15000);
+
+    sock.ev.on("connection.update", (update) => {
+      const { connection, lastDisconnect } = update;
+
+      if (connection === "open") {
+        clearTimeout(timeout);
+        resolve();
+      }
+
+      if (connection === "close") {
+        clearTimeout(timeout);
+        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+        reject(
+          new Error(`WhatsApp connection closed — status=${statusCode}`),
+        );
+      }
+    });
+  });
+
+  try {
+    await sock.sendMessage(groupJid, { text: message });
+    console.log(`[whatsapp] Message sent to ${groupJid}`);
+  } finally {
+    sock.end(undefined);
   }
 }

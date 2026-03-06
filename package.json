@@ -7,12 +7,19 @@
     "start": "node --loader ts-node/esm src/index.ts",
     "dev": "node --loader ts-node/esm src/index.ts",
     "build": "tsc",
-    "start:built": "node dist/index.js"
+    "build:lambda": "tsc && sam build",
+    "start:built": "node dist/index.js",
+    "auth-bootstrap": "node --loader ts-node/esm src/bootstrap.ts",
+    "deploy": "npm run build:lambda && sam deploy --guided"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1003.0",
+    "@aws-sdk/client-s3": "^3.1003.0",
+    "@aws-sdk/client-ssm": "^3.1003.0",
+    "@aws-sdk/lib-dynamodb": "^3.1003.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "axios": "^1.13.6",
     "dotenv": "^17.3.1",

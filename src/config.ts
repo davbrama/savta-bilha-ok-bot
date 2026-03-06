@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
 dotenv.config();
 
@@ -14,8 +15,55 @@ export interface Config {
   messageTemplate: string;
 }
 
-function loadConfig(): Config {
-  // Try loading from config.json if it exists, fall back to env vars
+/** AWS-specific config — set via Lambda environment variables in SAM template */
+export interface LambdaConfig {
+  s3Bucket: string;
+  dynamoTable: string;
+  ssmParamPath: string;
+}
+
+export function isLambda(): boolean {
+  return !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+}
+
+export function getLambdaConfig(): LambdaConfig {
+  return {
+    s3Bucket: process.env.AUTH_S3_BUCKET ?? '',
+    dynamoTable: process.env.DYNAMO_TABLE ?? '',
+    ssmParamPath: process.env.SSM_PARAM_PATH ?? '/oref-bot/config',
+  };
+}
+
+/** Load bot config from SSM Parameter Store (for Lambda mode) */
+export async function loadConfigFromSSM(): Promise<Config> {
+  const { ssmParamPath } = getLambdaConfig();
+  const ssm = new SSMClient({});
+
+  const result = await ssm.send(
+    new GetParameterCommand({ Name: ssmParamPath }),
+  );
+
+  if (!result.Parameter?.Value) {
+    throw new Error(`SSM parameter ${ssmParamPath} not found or empty`);
+  }
+
+  const params = JSON.parse(result.Parameter.Value) as Partial<Config>;
+
+  return {
+    groupJid: params.groupJid ?? '',
+    cities: params.cities ?? [],
+    alertCategories: params.alertCategories ?? [],
+    pollIntervalMs: params.pollIntervalMs ?? 2000,
+    sendDelayMs: params.sendDelayMs ?? 0, // no delay in Lambda — send immediately
+    authDir: '/tmp/auth',
+    messageTemplate:
+      params.messageTemplate ??
+      '\u{1F6A8} *{title}*\n\n\u{1F4CD} {cities}\n\n\u26A0\uFE0F {instructions}',
+  };
+}
+
+/** Load bot config from config.json / env vars (for local mode) */
+function loadLocalConfig(): Config {
   const configPath = path.resolve(process.cwd(), 'config.json');
   let fileConfig: Partial<Config> = {};
 
@@ -37,26 +85,18 @@ function loadConfig(): Config {
 
   return {
     groupJid,
-
-    // Hebrew city names — must match Pikud Ha'oref exactly
     cities: fileConfig.cities ?? parseCsv(process.env.CITIES),
-
-    // Alert category numbers to forward (default: missiles + aircraft + terrorists)
     alertCategories: fileConfig.alertCategories ??
       parseCsv(process.env.ALERT_CATEGORIES).map(Number).filter(Boolean),
-
     pollIntervalMs: fileConfig.pollIntervalMs ??
       parseInt(process.env.POLL_INTERVAL_MS ?? '2000', 10),
-
     sendDelayMs: fileConfig.sendDelayMs ??
       parseInt(process.env.SEND_DELAY_MS ?? '30000', 10),
-
     authDir: fileConfig.authDir ?? process.env.AUTH_DIR ?? './auth',
-
     messageTemplate:
       fileConfig.messageTemplate ??
       process.env.MESSAGE_TEMPLATE ??
-      '🚨 *{title}*\n\n📍 {cities}\n\n⚠️ {instructions}',
+      '\u{1F6A8} *{title}*\n\n\u{1F4CD} {cities}\n\n\u26A0\uFE0F {instructions}',
   };
 }
 
@@ -68,4 +108,5 @@ function parseCsv(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-export const config = loadConfig();
+// Eagerly loaded config for local mode (index.ts / AlertPoller class)
+export const config = loadLocalConfig();
