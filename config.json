@@ -1,8 +1,9 @@
 {
-  "groupJid": "",
+  "groupJid": "972544680177-1422794683@g.us",
   "cities": ["אריאל"],
   "alertCategories": [1, 2],
   "pollIntervalMs": 2000,
   "authDir": "./auth",
-  "messageTemplate": ""
+  "messageTemplate": "",
+  "sendDelayMs": 30000
 }
