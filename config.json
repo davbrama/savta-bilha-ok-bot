@@ -4,6 +4,6 @@
   "alertCategories": [1, 2],
   "pollIntervalMs": 2000,
   "authDir": "./auth",
-  "messageTemplate": "",
+  "messageTemplate": "👍",
   "sendDelayMs": 30000
 }
