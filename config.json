@@ -1,0 +1,10 @@
+{
+  "groupJid": "",
+  "cities": [
+    "אריאל"
+  ],
+  "alertCategories": [1, 2],
+  "pollIntervalMs": 2000,
+  "authDir": "./auth",
+  "messageTemplate": ""
+}
