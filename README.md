@@ -22,11 +22,8 @@ Copy `config.json` and fill it in:
 
 ```json
 {
-  "groupJid": "",           // leave empty on first run — the bot will print it
-  "cities": [
-    "תל אביב - מרכז העיר",
-    "תל אביב - מזרח"
-  ],
+  "groupJid": "", // leave empty on first run — the bot will print it
+  "cities": ["תל אביב - מרכז העיר", "תל אביב - מזרח"],
   "alertCategories": [1, 2, 5],
   "pollIntervalMs": 2000,
   "authDir": "./auth",
@@ -46,6 +43,7 @@ Copy `config.json` and fill it in:
 | 13 | All clear (ניתן לצאת מהמרחב המוגן) |
 
 **City names** must match Pikud Ha'oref exactly. You can find the canonical list in:
+
 - The oref API response itself when an alert fires
 - https://github.com/idodov/RedAlert (hebrew.md city list)
 

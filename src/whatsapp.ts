@@ -3,12 +3,12 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
   WASocket,
-} from '@whiskeysockets/baileys';
-import { Boom } from '@hapi/boom';
-import qrcode from 'qrcode-terminal';
-import path from 'path';
-import fs from 'fs';
-import { config } from './config.js';
+} from "@whiskeysockets/baileys";
+import { Boom } from "@hapi/boom";
+import qrcode from "qrcode-terminal";
+import path from "path";
+import fs from "fs";
+import { config } from "./config.js";
 
 export class WhatsAppClient {
   private sock: WASocket | null = null;
@@ -24,29 +24,29 @@ export class WhatsAppClient {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
-    console.log(`[whatsapp] Using Baileys v${version.join('.')}`);
+    console.log(`[whatsapp] Using Baileys v${version.join(".")}`);
 
     this.sock = makeWASocket({
       version,
       auth: state,
       printQRInTerminal: false, // we handle QR ourselves
-      browser: ['OrefBot', 'Chrome', '1.0.0'],
+      browser: ["OrefBot", "Chrome", "1.0.0"],
       syncFullHistory: false,
     });
 
-    this.sock.ev.on('creds.update', saveCreds);
+    this.sock.ev.on("creds.update", saveCreds);
 
-    this.sock.ev.on('connection.update', async (update) => {
+    this.sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        console.log('\n[whatsapp] Scan this QR code with your WhatsApp:\n');
+        console.log("\n[whatsapp] Scan this QR code with your WhatsApp:\n");
         qrcode.generate(qr, { small: true });
         console.log();
       }
 
-      if (connection === 'open') {
-        console.log('[whatsapp] Connected ✓');
+      if (connection === "open") {
+        console.log("[whatsapp] Connected ✓");
         this.ready = true;
         this.reconnectDelay = 2000; // reset backoff
 
@@ -62,13 +62,13 @@ export class WhatsAppClient {
         }
       }
 
-      if (connection === 'close') {
+      if (connection === "close") {
         this.ready = false;
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
         console.log(
-          `[whatsapp] Connection closed — status=${statusCode}, reconnect=${shouldReconnect}`
+          `[whatsapp] Connection closed — status=${statusCode}, reconnect=${shouldReconnect}`,
         );
 
         if (shouldReconnect) {
@@ -76,13 +76,13 @@ export class WhatsAppClient {
           setTimeout(() => {
             this.reconnectDelay = Math.min(
               this.reconnectDelay * 2,
-              this.maxReconnectDelay
+              this.maxReconnectDelay,
             );
             this.connect();
           }, this.reconnectDelay);
         } else {
           console.error(
-            '[whatsapp] Logged out. Delete ./auth and restart to re-authenticate.'
+            "[whatsapp] Logged out. Delete ./auth and restart to re-authenticate.",
           );
           process.exit(1);
         }
@@ -92,12 +92,12 @@ export class WhatsAppClient {
 
   async sendToGroup(jid: string, message: string): Promise<void> {
     if (!jid) {
-      console.warn('[whatsapp] No GROUP_JID configured, cannot send message');
+      console.warn("[whatsapp] No GROUP_JID configured, cannot send message");
       return;
     }
 
     if (!this.ready || !this.sock) {
-      console.warn('[whatsapp] Not connected yet, queuing message');
+      console.warn("[whatsapp] Not connected yet, queuing message");
       this.messageQueue.push(message);
       return;
     }
@@ -107,7 +107,7 @@ export class WhatsAppClient {
       console.log(`[whatsapp] Message sent to ${jid}`);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      console.error('[whatsapp] Failed to send message:', error.message);
+      console.error("[whatsapp] Failed to send message:", error.message);
       // Re-queue so it retries on reconnect
       this.messageQueue.unshift(message);
     }
@@ -125,18 +125,22 @@ export class WhatsAppClient {
       const groups = Object.values(chats);
 
       if (groups.length === 0) {
-        console.log('[whatsapp] No groups found. Make sure this account is in at least one group.');
+        console.log(
+          "[whatsapp] No groups found. Make sure this account is in at least one group.",
+        );
         return;
       }
 
-      console.log('\n[whatsapp] ── Groups this account is in ──');
+      console.log("\n[whatsapp] ── Groups this account is in ──");
       groups.forEach((g) => {
         console.log(`  ${g.subject.padEnd(40)} JID: ${g.id}`);
       });
-      console.log('[whatsapp] ─────────────────────────────────');
-      console.log('[whatsapp] Copy the JID and set it in config.json → groupJid\n');
+      console.log("[whatsapp] ─────────────────────────────────");
+      console.log(
+        "[whatsapp] Copy the JID and set it in config.json → groupJid\n",
+      );
     } catch (err) {
-      console.error('[whatsapp] Could not fetch groups:', err);
+      console.error("[whatsapp] Could not fetch groups:", err);
     }
   }
 }
