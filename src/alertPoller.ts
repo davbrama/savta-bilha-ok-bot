@@ -1,15 +1,15 @@
-import axios from 'axios';
-import { EventEmitter } from 'events';
-import { OrefAlert, OrefApiResponse } from './types.js';
-import { config } from './config.js';
+import axios from "axios";
+import { EventEmitter } from "events";
+import { OrefAlert, OrefApiResponse } from "./types.js";
+import { config } from "./config.js";
 
-const OREF_URL = 'https://www.oref.org.il/WarningMessages/alert/alerts.json';
+const OREF_URL = "https://www.oref.org.il/WarningMessages/alert/alerts.json";
 
 // Headers required to avoid being blocked — oref.org.il checks Referer
 const REQUEST_HEADERS = {
-  'Referer': 'https://www.oref.org.il/',
-  'X-Requested-With': 'XMLHttpRequest',
-  'Content-Type': 'application/json',
+  Referer: "https://www.oref.org.il/",
+  "X-Requested-With": "XMLHttpRequest",
+  "Content-Type": "application/json",
 };
 
 export interface AlertPollerEvents {
@@ -21,6 +21,7 @@ export class AlertPoller extends EventEmitter {
   private lastAlertId: string | null = null;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private cooldownUntil: number = 0;
 
   start(): void {
     if (this.running) return;
@@ -35,27 +36,37 @@ export class AlertPoller extends EventEmitter {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    console.log('[poller] Stopped');
+    console.log("[poller] Stopped");
+  }
+
+  triggerCooldown(): void {
+    this.cooldownUntil = Date.now() + config.cooldownMs;
+    this.lastAlertId = null;
+    console.log(`[poller] Cooldown started — pausing polls for ${config.cooldownMs / 1000}s`);
   }
 
   private schedule(): void {
     if (!this.running) return;
-    this.timer = setTimeout(() => this.poll(), config.pollIntervalMs);
+    const now = Date.now();
+    const delay = this.cooldownUntil > now
+      ? this.cooldownUntil - now
+      : config.pollIntervalMs;
+    this.timer = setTimeout(() => this.poll(), delay);
   }
 
   private async poll(): Promise<void> {
     try {
-      const response = await axios.get<OrefApiResponse | ''>(OREF_URL, {
+      const response = await axios.get<OrefApiResponse | "">(OREF_URL, {
         headers: REQUEST_HEADERS,
         timeout: 5000,
         // oref sometimes returns non-UTF8 — let axios handle encoding
-        responseType: 'text',
+        responseType: "text",
       });
 
       const body = response.data as unknown as string;
 
       // Empty body = no active alert
-      if (!body || body.trim() === '' || body.trim() === '{}') {
+      if (!body || body.trim() === "" || body.trim() === "{}") {
         this.lastAlertId = null;
         this.schedule();
         return;
@@ -92,15 +103,19 @@ export class AlertPoller extends EventEmitter {
       };
 
       if (this.passesFilter(alert)) {
-        console.log(`[poller] New alert — cat=${alert.cat}, cities=${alert.data.join(', ')}`);
-        this.emit('alert', alert);
+        console.log(
+          `[poller] New alert — cat=${alert.cat}, cities=${alert.data.join(", ")}`,
+        );
+        this.emit("alert", alert);
       } else {
-        console.log(`[poller] Alert filtered out — cat=${alert.cat}, cities=${alert.data.join(', ')}`);
+        console.log(
+          `[poller] Alert filtered out — id=${alert.id} cat=${alert.cat}, cities=${alert.data.join(", ")}`,
+        );
       }
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
-      console.error('[poller] Request failed:', error.message);
-      this.emit('error', error);
+      console.error("[poller] Request failed:", error.message);
+      this.emit("error", error);
     }
 
     this.schedule();
@@ -115,8 +130,7 @@ export class AlertPoller extends EventEmitter {
 
     // If no city filter configured, pass all
     const cityOk =
-      cities.length === 0 ||
-      alert.data.some((city) => cities.includes(city));
+      cities.length === 0 || alert.data.some((city) => cities.includes(city));
 
     return categoryOk && cityOk;
   }

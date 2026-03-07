@@ -28,7 +28,6 @@ async function main(): Promise<void> {
 
   const whatsapp = new WhatsAppClient();
   const poller = new AlertPoller();
-
   // Wire alert events to WhatsApp sends
   poller.on('alert', (alert: OrefAlert) => {
     const message = formatMessage(alert);
@@ -36,6 +35,7 @@ async function main(): Promise<void> {
     setTimeout(() => {
       console.log('[bot] Sending alert:\n' + message);
       whatsapp.sendToGroup(config.groupJid, message);
+      poller.triggerCooldown();
     }, config.sendDelayMs);
   });
 

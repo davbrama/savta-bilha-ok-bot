@@ -10,6 +10,7 @@ export interface Config {
   alertCategories: number[];
   pollIntervalMs: number;
   sendDelayMs: number;
+  cooldownMs: number;
   authDir: string;
   messageTemplate: string;
 }
@@ -50,6 +51,9 @@ function loadConfig(): Config {
 
     sendDelayMs: fileConfig.sendDelayMs ??
       parseInt(process.env.SEND_DELAY_MS ?? '30000', 10),
+
+    cooldownMs: fileConfig.cooldownMs ??
+      parseInt(process.env.COOLDOWN_MS ?? '600000', 10),
 
     authDir: fileConfig.authDir ?? process.env.AUTH_DIR ?? './auth',
 
