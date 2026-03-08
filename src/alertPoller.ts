@@ -21,7 +21,6 @@ export class AlertPoller extends EventEmitter {
   private lastAlertId: string | null = null;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
-  private cooldownUntil: number = 0;
 
   start(): void {
     if (this.running) return;
@@ -39,19 +38,9 @@ export class AlertPoller extends EventEmitter {
     console.log("[poller] Stopped");
   }
 
-  triggerCooldown(): void {
-    this.cooldownUntil = Date.now() + config.cooldownMs;
-    this.lastAlertId = null;
-    console.log(`[poller] Cooldown started — pausing polls for ${config.cooldownMs / 1000}s`);
-  }
-
   private schedule(): void {
     if (!this.running) return;
-    const now = Date.now();
-    const delay = this.cooldownUntil > now
-      ? this.cooldownUntil - now
-      : config.pollIntervalMs;
-    this.timer = setTimeout(() => this.poll(), delay);
+    this.timer = setTimeout(() => this.poll(), config.pollIntervalMs);
   }
 
   private async poll(): Promise<void> {
