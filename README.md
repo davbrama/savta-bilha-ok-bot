@@ -212,6 +212,9 @@ AUTH_S3_BUCKET=<bucket> KMS_KEY_ID=<key-arn> npm run auth-bootstrap
 | `cooldownMs` | `COOLDOWN_MS` | `300000` | Minimum time between sent alerts (5 min) |
 | `authDir` | `AUTH_DIR` | `./auth` | WhatsApp session file directory |
 | `messageTemplate` | `MESSAGE_TEMPLATE` | *(see below)* | Message template with `{title}`, `{cities}`, `{instructions}` placeholders |
+| `shabbatMode` | `SHABBAT_MODE` | `false` | Pause the bot during Shabbat |
+| `shabbatStartOffsetMin` | `SHABBAT_START_OFFSET_MIN` | `30` | Minutes before Friday sunset to stop |
+| `shabbatEndOffsetMin` | `SHABBAT_END_OFFSET_MIN` | `40` | Minutes after Saturday sunset to resume |
 
 ### Lambda mode (SSM Parameter `/oref-bot/config`)
 
@@ -241,6 +244,23 @@ Same fields as above, stored as a JSON string in SSM. The Lambda overrides `send
 | 101 | Emergency event (אירוע חירום) |
 
 City names must match Pikud Ha'oref exactly. Leave `cities` and/or `alertCategories` as empty arrays to receive all alerts.
+
+### Shabbat mode
+
+When `shabbatMode` is enabled, the bot automatically pauses during Shabbat based on Tel Aviv sunset times (calculated with `suncalc`):
+
+- **Stops** `shabbatStartOffsetMin` minutes before sunset on Friday (default: 30 min)
+- **Resumes** `shabbatEndOffsetMin` minutes after sunset on Saturday (default: 40 min)
+
+If the bot starts during Shabbat, it waits until Shabbat ends before polling.
+
+```json
+{
+  "shabbatMode": true,
+  "shabbatStartOffsetMin": 30,
+  "shabbatEndOffsetMin": 40
+}
+```
 
 ## Security
 
@@ -294,10 +314,11 @@ Failed Lambda invocations are routed to an SQS dead-letter queue (`oref-bot-dlq`
 
 ```
 src/
-  index.ts          Entry point (local mode)
-  handler.ts        Lambda handler
-  alertPoller.ts    Oref API polling + DynamoDB dedup (Lambda)
-  whatsapp.ts       WhatsApp client (local + Lambda sendOnce)
+  index.ts              Entry point (local mode)
+  handler.ts            Lambda handler
+  alertPoller.ts        Oref API polling + DynamoDB dedup (Lambda)
+  whatsapp.ts           WhatsApp client (local + Lambda sendOnce)
+  shabbatScheduler.ts   Pauses poller during Shabbat (sunset-based)
   s3Auth.ts         S3-backed WhatsApp auth state
   bootstrap.ts      One-time QR auth + S3 upload
   config.ts         Config loading (local: config.json, Lambda: SSM)

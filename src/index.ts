@@ -1,5 +1,6 @@
 import { AlertPoller } from './alertPoller.js';
 import { WhatsAppClient } from './whatsapp.js';
+import { ShabbatScheduler } from './shabbatScheduler.js';
 import { OrefAlert, ALERT_CATEGORIES } from './types.js';
 import { config } from './config.js';
 
@@ -57,11 +58,19 @@ async function main(): Promise<void> {
 
   // Connect WhatsApp first, then start polling
   await whatsapp.connect();
-  poller.start();
+
+  let scheduler: ShabbatScheduler | null = null;
+  if (config.shabbatMode) {
+    scheduler = new ShabbatScheduler(poller);
+    scheduler.init();
+  } else {
+    poller.start();
+  }
 
   // Graceful shutdown
   const shutdown = () => {
     console.log('\n[bot] Shutting down...');
+    scheduler?.destroy();
     poller.stop();
     process.exit(0);
   };

@@ -15,6 +15,9 @@ export interface Config {
   cooldownMs: number;
   authDir: string;
   messageTemplate: string;
+  shabbatMode: boolean;
+  shabbatStartOffsetMin: number;
+  shabbatEndOffsetMin: number;
 }
 
 /** AWS-specific config — set via Lambda environment variables in SAM template */
@@ -65,6 +68,9 @@ export async function loadConfigFromSSM(): Promise<Config> {
     messageTemplate:
       params.messageTemplate ??
       '\u{1F6A8} *{title}*\n\n\u{1F4CD} {cities}\n\n\u26A0\uFE0F {instructions}',
+    shabbatMode: params.shabbatMode ?? false,
+    shabbatStartOffsetMin: params.shabbatStartOffsetMin ?? 30,
+    shabbatEndOffsetMin: params.shabbatEndOffsetMin ?? 40,
   };
 }
 
@@ -107,6 +113,12 @@ function loadLocalConfig(): Config {
       fileConfig.messageTemplate ??
       process.env.MESSAGE_TEMPLATE ??
       '\u{1F6A8} *{title}*\n\n\u{1F4CD} {cities}\n\n\u26A0\uFE0F {instructions}',
+    shabbatMode: fileConfig.shabbatMode ??
+      (process.env.SHABBAT_MODE === 'true'),
+    shabbatStartOffsetMin: fileConfig.shabbatStartOffsetMin ??
+      parseInt(process.env.SHABBAT_START_OFFSET_MIN ?? '30', 10),
+    shabbatEndOffsetMin: fileConfig.shabbatEndOffsetMin ??
+      parseInt(process.env.SHABBAT_END_OFFSET_MIN ?? '40', 10),
   };
 }
 
