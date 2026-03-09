@@ -15,20 +15,47 @@ Globals:
     MemorySize: 256
 
 Resources:
-  # --- S3 bucket for WhatsApp auth (encrypted with KMS) ---
+  # --- KMS key for encrypting auth credentials ---
+  AuthEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Encrypts WhatsApp auth credentials in S3
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccountRoot
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  AuthEncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-auth-key'
+      TargetKeyId: !Ref AuthEncryptionKey
+
+  # --- S3 bucket for WhatsApp auth (encrypted with dedicated KMS key) ---
   AuthBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt AuthEncryptionKey.Arn
             BucketKeyEnabled: true
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
 
   AuthBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -45,13 +72,27 @@ Resources:
             Condition:
               StringNotEquals:
                 s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt AuthBucket.Arn
+              - !Sub '${AuthBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
 
   # --- DynamoDB table for alert deduplication ---
   AlertStateTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub '${AWS::StackName}-alert-state'
       BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: alertId
           AttributeType: S
@@ -71,33 +112,63 @@ Resources:
       Value: !Ref BotConfigJson
       Description: Oref bot configuration (edit in AWS Console)
 
+  # --- Dead-letter queue for failed invocations ---
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${AWS::StackName}-dlq'
+      MessageRetentionPeriod: 1209600  # 14 days
+      SqsManagedSseEnabled: true
+
   # --- Lambda function ---
   OrefBotFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: dist/handler.handler
-      CodeUri: .
+      Handler: handler.handler
+      CodeUri: .build
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt DeadLetterQueue.Arn
       Environment:
         Variables:
           AUTH_S3_BUCKET: !Ref AuthBucket
           DYNAMO_TABLE: !Ref AlertStateTable
           SSM_PARAM_PATH: !Sub '/${AWS::StackName}/config'
+          KMS_KEY_ID: !GetAtt AuthEncryptionKey.Arn
       Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref AuthBucket
-        - DynamoDBCrudPolicy:
-            TableName: !Ref AlertStateTable
+        # S3: only read/write auth objects (no delete, no bucket ops)
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:ListBucket
+              Resource:
+                - !GetAtt AuthBucket.Arn
+                - !Sub '${AuthBucket.Arn}/*'
+        # DynamoDB: only get/put items (no scan, no delete table)
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt AlertStateTable.Arn
+        # SSM: read-only
         - SSMParameterReadPolicy:
             ParameterName: !Sub '${AWS::StackName}/config'
+        # KMS: scoped to the dedicated auth encryption key only
         - Statement:
             - Effect: Allow
               Action:
                 - kms:Decrypt
                 - kms:GenerateDataKey
-              Resource: '*'
-              Condition:
-                StringEquals:
-                  kms:ViaService: !Sub 's3.${AWS::Region}.amazonaws.com'
+              Resource: !GetAtt AuthEncryptionKey.Arn
+        # SQS: allow Lambda to send to DLQ
+        - Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt DeadLetterQueue.Arn
       Events:
         PollSchedule:
           Type: Schedule
@@ -119,3 +190,6 @@ Outputs:
   ConfigParamPath:
     Description: SSM parameter path for bot config
     Value: !Sub '/${AWS::StackName}/config'
+  DeadLetterQueueUrl:
+    Description: DLQ URL for failed Lambda invocations
+    Value: !Ref DeadLetterQueue

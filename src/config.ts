@@ -22,6 +22,7 @@ export interface LambdaConfig {
   s3Bucket: string;
   dynamoTable: string;
   ssmParamPath: string;
+  kmsKeyId: string;
 }
 
 export function isLambda(): boolean {
@@ -33,6 +34,7 @@ export function getLambdaConfig(): LambdaConfig {
     s3Bucket: process.env.AUTH_S3_BUCKET ?? '',
     dynamoTable: process.env.DYNAMO_TABLE ?? '',
     ssmParamPath: process.env.SSM_PARAM_PATH ?? '/oref-bot/config',
+    kmsKeyId: process.env.KMS_KEY_ID ?? '',
   };
 }
 

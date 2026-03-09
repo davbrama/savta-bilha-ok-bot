@@ -186,7 +186,7 @@ export async function pollOnce(opts: {
       TableName: opts.dynamoTable,
       Item: {
         alertId: parsed.id,
-        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        expiresAt: Math.floor(Date.now() / 1000) + 86400, // 24 hours
       },
     }),
   );

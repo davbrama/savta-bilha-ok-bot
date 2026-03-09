@@ -3,3 +3,5 @@ dist/
 auth/
 .env
 *.log
+.build/
+packaged.yaml

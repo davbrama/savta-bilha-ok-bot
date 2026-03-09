@@ -7,10 +7,10 @@
     "start": "node --loader ts-node/esm src/index.ts",
     "dev": "node --loader ts-node/esm src/index.ts",
     "build": "tsc",
-    "build:lambda": "tsc && sam build",
+    "build:lambda": "bash scripts/build-lambda.sh",
     "start:built": "node dist/index.js",
     "auth-bootstrap": "node --loader ts-node/esm src/bootstrap.ts",
-    "deploy": "npm run build:lambda && sam deploy --guided"
+    "deploy": "npm run build:lambda && bash scripts/deploy.sh"
   },
   "keywords": [],
   "author": "",

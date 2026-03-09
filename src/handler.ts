@@ -39,9 +39,12 @@ export async function handler(): Promise<{ statusCode: number; body: string }> {
   const message = formatMessage(alert, cfg);
   console.log(`[handler] New alert, sending to ${cfg.groupJid}:\n${message}`);
 
-  const authState = await useS3AuthState(lambdaCfg.s3Bucket);
+  const authState = await useS3AuthState(lambdaCfg.s3Bucket, lambdaCfg.kmsKeyId);
 
-  await sendOnce(cfg.groupJid, message, authState);
-
-  return { statusCode: 200, body: `Alert ${alert.id} sent` };
+  try {
+    await sendOnce(cfg.groupJid, message, authState);
+    return { statusCode: 200, body: `Alert ${alert.id} sent` };
+  } finally {
+    authState.cleanup();
+  }
 }

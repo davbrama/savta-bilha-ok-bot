@@ -10,6 +10,14 @@ import path from 'path';
 
 const TMP_AUTH_DIR = '/tmp/auth';
 
+function cleanupTmpAuth() {
+  try {
+    fs.rmSync(TMP_AUTH_DIR, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup
+  }
+}
+
 /**
  * Downloads all auth files from S3 into /tmp/auth, then wraps Baileys
  * useMultiFileAuthState on that directory. On creds.update, changed files
@@ -18,11 +26,11 @@ const TMP_AUTH_DIR = '/tmp/auth';
  * The S3 bucket is configured with SSE-KMS default encryption, so all
  * objects are encrypted at rest automatically — no client-side crypto needed.
  */
-export async function useS3AuthState(bucket: string, prefix = 'auth/') {
+export async function useS3AuthState(bucket: string, kmsKeyId?: string, prefix = 'auth/') {
   const s3 = new S3Client({});
 
   // Ensure clean temp directory
-  fs.rmSync(TMP_AUTH_DIR, { recursive: true, force: true });
+  cleanupTmpAuth();
   fs.mkdirSync(TMP_AUTH_DIR, { recursive: true });
 
   // Download all auth files from S3 to /tmp/auth
@@ -56,13 +64,13 @@ export async function useS3AuthState(bucket: string, prefix = 'auth/') {
   // Wrap saveCreds to also upload changed files back to S3
   const saveCreds = async () => {
     await originalSaveCreds();
-    await uploadAuthDir(s3, bucket, prefix);
+    await uploadAuthDir(s3, bucket, prefix, kmsKeyId);
   };
 
-  return { state, saveCreds };
+  return { state, saveCreds, cleanup: cleanupTmpAuth };
 }
 
-async function uploadAuthDir(s3: S3Client, bucket: string, prefix: string) {
+async function uploadAuthDir(s3: S3Client, bucket: string, prefix: string, kmsKeyId?: string) {
   const files = fs.readdirSync(TMP_AUTH_DIR);
   for (const file of files) {
     const filePath = path.join(TMP_AUTH_DIR, file);
@@ -73,9 +81,8 @@ async function uploadAuthDir(s3: S3Client, bucket: string, prefix: string) {
         Key: `${prefix}${file}`,
         Body: content,
         ContentType: 'application/json',
-        // SSE-KMS is enforced by bucket default encryption — explicit header
-        // ensures the request works even if the bucket policy requires it
         ServerSideEncryption: 'aws:kms',
+        ...(kmsKeyId ? { SSEKMSKeyId: kmsKeyId } : {}),
       }),
     );
   }
@@ -89,6 +96,7 @@ export async function uploadLocalAuthToS3(
   localAuthDir: string,
   bucket: string,
   prefix = 'auth/',
+  kmsKeyId?: string,
 ) {
   const s3 = new S3Client({});
   const files = fs.readdirSync(localAuthDir);
@@ -105,6 +113,7 @@ export async function uploadLocalAuthToS3(
         Body: content,
         ContentType: 'application/json',
         ServerSideEncryption: 'aws:kms',
+        ...(kmsKeyId ? { SSEKMSKeyId: kmsKeyId } : {}),
       }),
     );
   }
