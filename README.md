@@ -252,7 +252,7 @@ When `shabbatMode` is enabled, the bot automatically pauses during Shabbat based
 - **Stops** `shabbatStartOffsetMin` minutes before sunset on Friday (default: 30 min)
 - **Resumes** `shabbatEndOffsetMin` minutes after sunset on Saturday (default: 40 min)
 
-If the bot starts during Shabbat, it waits until Shabbat ends before polling.
+Works in both modes: local mode uses a scheduler to start/stop the poller, Lambda mode returns immediately on each invocation during Shabbat. If the bot starts during Shabbat, it waits until Shabbat ends before polling.
 
 ```json
 {

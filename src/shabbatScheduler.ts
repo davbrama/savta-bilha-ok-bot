@@ -1,6 +1,6 @@
 import SunCalc from 'suncalc';
 import { AlertPoller } from './alertPoller.js';
-import { config } from './config.js';
+import { Config, config } from './config.js';
 
 const TEL_AVIV_LAT = 32.0853;
 const TEL_AVIV_LON = 34.7818;
@@ -8,6 +8,51 @@ const TEL_AVIV_LON = 34.7818;
 interface ShabbatWindow {
   start: Date;
   end: Date;
+}
+
+function getShabbatWindowForFriday(friday: Date, cfg: Config): ShabbatWindow {
+  const saturday = new Date(friday);
+  saturday.setDate(friday.getDate() + 1);
+
+  const fridaySunset = SunCalc.getTimes(friday, TEL_AVIV_LAT, TEL_AVIV_LON).sunset;
+  const saturdaySunset = SunCalc.getTimes(saturday, TEL_AVIV_LAT, TEL_AVIV_LON).sunset;
+
+  const start = new Date(fridaySunset.getTime() - cfg.shabbatStartOffsetMin * 60_000);
+  const end = new Date(saturdaySunset.getTime() + cfg.shabbatEndOffsetMin * 60_000);
+
+  return { start, end };
+}
+
+function getCurrentShabbatWindow(now: Date, cfg: Config): ShabbatWindow | null {
+  const day = now.getDay(); // 0=Sun, 5=Fri, 6=Sat
+
+  if (day === 5) {
+    return getShabbatWindowForFriday(now, cfg);
+  }
+
+  if (day === 6) {
+    const friday = new Date(now);
+    friday.setDate(now.getDate() - 1);
+    return getShabbatWindowForFriday(friday, cfg);
+  }
+
+  if (day === 0) {
+    const friday = new Date(now);
+    friday.setDate(now.getDate() - 2);
+    const window = getShabbatWindowForFriday(friday, cfg);
+    if (now <= window.end) return window;
+  }
+
+  return null;
+}
+
+/** Check if it's currently Shabbat. Accepts optional config for Lambda use. */
+export function isShabbatNow(cfg?: Config): boolean {
+  const c = cfg ?? config;
+  if (!c.shabbatMode) return false;
+  const now = new Date();
+  const window = getCurrentShabbatWindow(now, c);
+  return window !== null && now >= window.start && now <= window.end;
 }
 
 export class ShabbatScheduler {
@@ -20,7 +65,7 @@ export class ShabbatScheduler {
 
   init(): void {
     const now = new Date();
-    const window = this.getCurrentShabbatWindow(now);
+    const window = getCurrentShabbatWindow(now, config);
 
     if (window && now >= window.start && now <= window.end) {
       console.log(`[shabbat] Currently Shabbat — poller will remain stopped until ${window.end.toLocaleString('he-IL')}`);
@@ -40,57 +85,17 @@ export class ShabbatScheduler {
     }
   }
 
-  private getShabbatWindow(friday: Date): ShabbatWindow {
-    const saturday = new Date(friday);
-    saturday.setDate(friday.getDate() + 1);
-
-    const fridaySunset = SunCalc.getTimes(friday, TEL_AVIV_LAT, TEL_AVIV_LON).sunset;
-    const saturdaySunset = SunCalc.getTimes(saturday, TEL_AVIV_LAT, TEL_AVIV_LON).sunset;
-
-    const start = new Date(fridaySunset.getTime() - config.shabbatStartOffsetMin * 60_000);
-    const end = new Date(saturdaySunset.getTime() + config.shabbatEndOffsetMin * 60_000);
-
-    return { start, end };
-  }
-
-  private getCurrentShabbatWindow(now: Date): ShabbatWindow | null {
-    const day = now.getDay(); // 0=Sun, 5=Fri, 6=Sat
-
-    if (day === 5) {
-      // Friday — get this week's window
-      return this.getShabbatWindow(now);
-    }
-
-    if (day === 6) {
-      // Saturday — Friday was yesterday
-      const friday = new Date(now);
-      friday.setDate(now.getDate() - 1);
-      return this.getShabbatWindow(friday);
-    }
-
-    // Sunday–Thursday: check if we're still in Saturday night's window
-    // (unlikely but handles edge case of bot starting just after midnight Saturday)
-    if (day === 0) {
-      const friday = new Date(now);
-      friday.setDate(now.getDate() - 2);
-      const window = this.getShabbatWindow(friday);
-      if (now <= window.end) return window;
-    }
-
-    return null;
-  }
-
   private getNextShabbatStart(now: Date): Date {
     const day = now.getDay();
     const daysUntilFriday = (5 - day + 7) % 7 || 7; // at least 1 day ahead if already Friday
     const nextFriday = new Date(now);
     nextFriday.setDate(now.getDate() + daysUntilFriday);
 
-    const window = this.getShabbatWindow(nextFriday);
+    const window = getShabbatWindowForFriday(nextFriday, config);
 
     // If it's Friday and we haven't passed the start yet, use today
     if (day === 5) {
-      const todayWindow = this.getShabbatWindow(now);
+      const todayWindow = getShabbatWindowForFriday(now, config);
       if (now < todayWindow.start) return todayWindow.start;
     }
 
@@ -111,7 +116,7 @@ export class ShabbatScheduler {
     this.poller.stop();
 
     const now = new Date();
-    const window = this.getCurrentShabbatWindow(now);
+    const window = getCurrentShabbatWindow(now, config);
     if (window) {
       console.log(`[shabbat] Poller will resume at ${window.end.toLocaleString('he-IL')}`);
       this.scheduleTransition(window.end, () => this.onShabbatEnd());

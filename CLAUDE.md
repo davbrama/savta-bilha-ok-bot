@@ -28,13 +28,13 @@ All source is in `src/` with modules for local and Lambda modes:
 - **whatsapp.ts** — Wraps `@whiskeysockets/baileys`. Local mode: `WhatsAppClient` class with reconnection/queueing. Lambda mode: `sendOnce()` for ephemeral connect-send-disconnect.
 - **config.ts** — Local: loads from `config.json` / env vars. Lambda: `loadConfigFromSSM()` reads from SSM Parameter Store. Also exports `getLambdaConfig()` for AWS resource references (env vars set by SAM template).
 - **types.ts** — `OrefAlert`, `OrefApiResponse` interfaces and `ALERT_CATEGORIES` map.
+- **shabbatScheduler.ts** — Shabbat awareness for both modes. Uses `suncalc` to compute Tel Aviv sunset times. Exports `isShabbatNow()` (used by Lambda handler for early return) and `ShabbatScheduler` class (used by local mode to start/stop poller via setTimeout). Configurable offsets: stops `shabbatStartOffsetMin` before Friday sunset, resumes `shabbatEndOffsetMin` after Saturday sunset.
 
 ### Local mode
 - **index.ts** — Entry point. Wires AlertPoller events to WhatsAppClient, applies `sendDelayMs` + jitter + cooldown before sending, handles graceful shutdown. Optionally uses ShabbatScheduler when `shabbatMode` is enabled.
-- **shabbatScheduler.ts** — Pauses the poller during Shabbat. Uses `suncalc` to compute Tel Aviv sunset times. Stops poller `shabbatStartOffsetMin` before Friday sunset, restarts `shabbatEndOffsetMin` after Saturday sunset. Handles bot starting mid-Shabbat.
 
 ### Lambda mode
-- **handler.ts** — Lambda entry point. Polls oref API, only initializes S3 auth + Baileys when there's an alert to send (no WhatsApp overhead on quiet polls).
+- **handler.ts** — Lambda entry point. Polls oref API, only initializes S3 auth + Baileys when there's an alert to send (no WhatsApp overhead on quiet polls). Skips invocation entirely during Shabbat when `shabbatMode` is enabled.
 - **s3Auth.ts** — Downloads WhatsApp auth from S3 to `/tmp/auth`, wraps Baileys auth state, uploads changes back to S3 on `creds.update`, cleans up `/tmp/auth` after use.
 - **bootstrap.ts** — One-time script: QR scan → WhatsApp pairing → handles 515 restart-required → reconnects → uploads auth to S3 → cleans up local files.
 
