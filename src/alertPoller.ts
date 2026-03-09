@@ -6,6 +6,7 @@ import { OrefAlert, OrefApiResponse } from './types.js';
 import { config } from './config.js';
 
 const OREF_URL = 'https://www.oref.org.il/WarningMessages/alert/alerts.json';
+const COOLDOWN_SEC = 600; // 10 minutes
 
 // Headers required to avoid being blocked — oref.org.il checks Referer
 const REQUEST_HEADERS = {
@@ -158,13 +159,29 @@ export async function pollOnce(opts: {
     return null;
   }
 
-  // Check DynamoDB for dedup
   const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  // Check cooldown — skip all alerts if we sent one recently
+  const cooldownItem = await dynamo.send(
+    new GetCommand({ TableName: opts.dynamoTable, Key: { alertId: '_cooldown' } }),
+  );
+  if (cooldownItem.Item) {
+    const lastSentAt = cooldownItem.Item.lastSentAt as number;
+    const elapsed = nowSec - lastSentAt;
+    if (elapsed < COOLDOWN_SEC) {
+      console.log(`[poller] Cooldown active — ${COOLDOWN_SEC - elapsed}s remaining, suppressing alert ${parsed.id}`);
+      return null;
+    }
+  }
+
+  // Check DynamoDB for ID dedup (same alert within 1 hour)
   const existing = await dynamo.send(
     new GetCommand({ TableName: opts.dynamoTable, Key: { alertId: parsed.id } }),
   );
   if (existing.Item) {
-    return null; // already sent
+    console.log(`[poller] Duplicate alert ${parsed.id} — already sent within 1h`);
+    return null;
   }
 
   const alert: OrefAlert = {
@@ -180,16 +197,29 @@ export async function pollOnce(opts: {
     return null;
   }
 
-  // Mark as sent in DynamoDB (TTL = 1 hour from now)
-  await dynamo.send(
-    new PutCommand({
-      TableName: opts.dynamoTable,
-      Item: {
-        alertId: parsed.id,
-        expiresAt: Math.floor(Date.now() / 1000) + 86400, // 24 hours
-      },
-    }),
-  );
+  // Mark alert ID as sent (TTL = 1 hour)
+  // Update cooldown timestamp
+  await Promise.all([
+    dynamo.send(
+      new PutCommand({
+        TableName: opts.dynamoTable,
+        Item: {
+          alertId: parsed.id,
+          expiresAt: nowSec + 3600, // 1 hour
+        },
+      }),
+    ),
+    dynamo.send(
+      new PutCommand({
+        TableName: opts.dynamoTable,
+        Item: {
+          alertId: '_cooldown',
+          lastSentAt: nowSec,
+          expiresAt: nowSec + COOLDOWN_SEC,
+        },
+      }),
+    ),
+  ]);
 
   console.log(`[poller] New alert — cat=${alert.cat}, cities=${alert.data.join(', ')}`);
   return alert;

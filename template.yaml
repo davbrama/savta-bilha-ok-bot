@@ -11,7 +11,7 @@ Parameters:
 Globals:
   Function:
     Runtime: nodejs20.x
-    Timeout: 30
+    Timeout: 55
     MemorySize: 256
 
 Resources:

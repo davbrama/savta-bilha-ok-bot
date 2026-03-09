@@ -20,31 +20,57 @@ function formatMessage(alert: OrefAlert, cfg: Config): string {
     .replace('{instructions}', alert.desc);
 }
 
-export async function handler(): Promise<{ statusCode: number; body: string }> {
+const POLL_INTERVAL_MS = 2000;
+const RESERVED_MS = 5000; // stop polling this many ms before Lambda timeout
+
+export async function handler(
+  _event: unknown,
+  context?: { getRemainingTimeInMillis?: () => number },
+): Promise<{ statusCode: number; body: string }> {
   const lambdaCfg = getLambdaConfig();
   const cfg = await loadConfigFromSSM();
 
-  console.log(`[handler] Polling oref API...`);
+  const deadline = context?.getRemainingTimeInMillis
+    ? () => context.getRemainingTimeInMillis!()
+    : (() => {
+        const end = Date.now() + 50_000; // fallback ~50s
+        return () => end - Date.now();
+      })();
 
-  const alert = await pollOnce({
-    dynamoTable: lambdaCfg.dynamoTable,
-    cities: cfg.cities,
-    alertCategories: cfg.alertCategories,
-  });
+  const sentAlerts: string[] = [];
 
-  if (!alert) {
-    return { statusCode: 200, body: 'No new alerts' };
+  while (deadline() > RESERVED_MS) {
+    console.log(`[handler] Polling oref API...`);
+
+    const alert = await pollOnce({
+      dynamoTable: lambdaCfg.dynamoTable,
+      cities: cfg.cities,
+      alertCategories: cfg.alertCategories,
+    });
+
+    if (alert) {
+      const message = formatMessage(alert, cfg);
+      console.log(`[handler] New alert, sending to ${cfg.groupJid}:\n${message}`);
+
+      const authState = await useS3AuthState(lambdaCfg.s3Bucket, lambdaCfg.kmsKeyId);
+      try {
+        await sendOnce(cfg.groupJid, message, authState);
+        sentAlerts.push(alert.id);
+      } finally {
+        authState.cleanup();
+      }
+    }
+
+    // Wait before next poll, but break if we'd exceed the deadline
+    if (deadline() > RESERVED_MS + POLL_INTERVAL_MS) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    } else {
+      break;
+    }
   }
 
-  const message = formatMessage(alert, cfg);
-  console.log(`[handler] New alert, sending to ${cfg.groupJid}:\n${message}`);
-
-  const authState = await useS3AuthState(lambdaCfg.s3Bucket, lambdaCfg.kmsKeyId);
-
-  try {
-    await sendOnce(cfg.groupJid, message, authState);
-    return { statusCode: 200, body: `Alert ${alert.id} sent` };
-  } finally {
-    authState.cleanup();
-  }
+  const body = sentAlerts.length > 0
+    ? `Sent alerts: ${sentAlerts.join(', ')}`
+    : 'No new alerts';
+  return { statusCode: 200, body };
 }
