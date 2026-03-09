@@ -11,6 +11,8 @@ export interface Config {
   alertCategories: number[];
   pollIntervalMs: number;
   sendDelayMs: number;
+  sendDelayJitterMs: number;
+  cooldownMs: number;
   authDir: string;
   messageTemplate: string;
 }
@@ -55,6 +57,8 @@ export async function loadConfigFromSSM(): Promise<Config> {
     alertCategories: params.alertCategories ?? [],
     pollIntervalMs: params.pollIntervalMs ?? 2000,
     sendDelayMs: params.sendDelayMs ?? 0, // no delay in Lambda — send immediately
+    sendDelayJitterMs: params.sendDelayJitterMs ?? 0,
+    cooldownMs: params.cooldownMs ?? 0,
     authDir: '/tmp/auth',
     messageTemplate:
       params.messageTemplate ??
@@ -92,6 +96,10 @@ function loadLocalConfig(): Config {
       parseInt(process.env.POLL_INTERVAL_MS ?? '2000', 10),
     sendDelayMs: fileConfig.sendDelayMs ??
       parseInt(process.env.SEND_DELAY_MS ?? '30000', 10),
+    sendDelayJitterMs: fileConfig.sendDelayJitterMs ??
+      parseInt(process.env.SEND_DELAY_JITTER_MS ?? '0', 10),
+    cooldownMs: fileConfig.cooldownMs ??
+      parseInt(process.env.COOLDOWN_MS ?? '300000', 10),
     authDir: fileConfig.authDir ?? process.env.AUTH_DIR ?? './auth',
     messageTemplate:
       fileConfig.messageTemplate ??

@@ -28,15 +28,26 @@ async function main(): Promise<void> {
 
   const whatsapp = new WhatsAppClient();
   const poller = new AlertPoller();
+  let lastSentAt = 0;
 
-  // Wire alert events to WhatsApp sends
   poller.on('alert', (alert: OrefAlert) => {
+    const now = Date.now();
+    const elapsed = now - lastSentAt;
+    if (elapsed < config.cooldownMs) {
+      console.log(`[bot] Alert suppressed — cooldown active for ${Math.ceil((config.cooldownMs - elapsed) / 1000)}s more`);
+      return;
+    }
+
     const message = formatMessage(alert);
-    console.log(`[bot] Alert received — sending in ${config.sendDelayMs}ms`);
+    const jitter = Math.floor(Math.random() * (config.sendDelayJitterMs + 1));
+    const delay = config.sendDelayMs + jitter;
+    console.log(`[bot] Alert received — sending in ${delay}ms`);
+    lastSentAt = now;
+
     setTimeout(() => {
       console.log('[bot] Sending alert:\n' + message);
       whatsapp.sendToGroup(config.groupJid, message);
-    }, config.sendDelayMs);
+    }, delay);
   });
 
   poller.on('error', (err: Error) => {
