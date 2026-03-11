@@ -1,4 +1,4 @@
-import { pollOnce } from "./alertPoller.js";
+import { pollOnce, markAlertSent } from "./alertPoller.js";
 import { sendOnce } from "./whatsapp.js";
 import { useS3AuthState } from "./s3Auth.js";
 import { loadConfigFromSSM, getLambdaConfig, Config } from "./config.js";
@@ -39,7 +39,7 @@ export async function handler(
   const deadline = context?.getRemainingTimeInMillis
     ? () => context.getRemainingTimeInMillis!()
     : (() => {
-        const end = Date.now() + 50_000; // fallback ~50s
+        const end = Date.now() + 290_000; // fallback ~290s
         return () => end - Date.now();
       })();
 
@@ -66,6 +66,7 @@ export async function handler(
       );
       try {
         await sendOnce(cfg.groupJid, message, authState);
+        await markAlertSent(alert.id, lambdaCfg.dynamoTable);
         sentAlerts.push(alert.id);
       } finally {
         authState.cleanup();

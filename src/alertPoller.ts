@@ -130,6 +130,7 @@ function passesFilter(
 /**
  * Single-shot poll for Lambda. Fetches the oref API once, checks DynamoDB
  * for dedup, and returns the alert if it's new and passes filters.
+ * Does NOT write to DynamoDB — call markAlertSent() after a successful send.
  */
 export async function pollOnce(opts: {
   dynamoTable: string;
@@ -197,21 +198,31 @@ export async function pollOnce(opts: {
     return null;
   }
 
-  // Mark alert ID as sent (TTL = 1 hour)
-  // Update cooldown timestamp
+  console.log(`[poller] New alert — cat=${alert.cat}, cities=${alert.data.join(', ')}`);
+  return alert;
+}
+
+/**
+ * Marks an alert as sent in DynamoDB (dedup + cooldown).
+ * Call this only after the WhatsApp message has been successfully sent.
+ */
+export async function markAlertSent(alertId: string, dynamoTable: string): Promise<void> {
+  const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  const nowSec = Math.floor(Date.now() / 1000);
+
   await Promise.all([
     dynamo.send(
       new PutCommand({
-        TableName: opts.dynamoTable,
+        TableName: dynamoTable,
         Item: {
-          alertId: parsed.id,
+          alertId,
           expiresAt: nowSec + 3600, // 1 hour
         },
       }),
     ),
     dynamo.send(
       new PutCommand({
-        TableName: opts.dynamoTable,
+        TableName: dynamoTable,
         Item: {
           alertId: '_cooldown',
           lastSentAt: nowSec,
@@ -220,7 +231,4 @@ export async function pollOnce(opts: {
       }),
     ),
   ]);
-
-  console.log(`[poller] New alert — cat=${alert.cat}, cities=${alert.data.join(', ')}`);
-  return alert;
 }
